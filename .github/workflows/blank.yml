@@ -2,74 +2,117 @@ name: Build and Release Aircrack-ng for ARMv8l
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Create a new release'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
-    env:
-      GITHUB_TOKEN: ghp_your_token_here  # Replace with your real token
+    container:
+      image: arm64v8/ubuntu:latest
 
     steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@v3
+    - name: Set up build environment
+      run: |
+        apt-get update
+        apt-get install -y \
+          git \
+          build-essential \
+          libssl-dev \
+          libpcap-dev \
+          libnl-3-dev \
+          libnl-genl-3-dev \
+          pkg-config \
+          autoconf \
+          automake \
+          libtool \
+          wget \
+          ca-certificates
 
-      - name: Install Dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y \
-            build-essential \
-            libssl-dev \
-            pkg-config \
-            libnl-3-dev \
-            libnl-genl-3-dev \
-            libpcap-dev \
-            zlib1g-dev \
-            git \
-            autoconf \
-            automake \
-            libtool
+    - name: Checkout Aircrack-ng source code
+      uses: actions/checkout@v3
+      with:
+        repository: 'aircrack-ng/aircrack-ng'
+        fetch-depth: 1
 
-      - name: Clone Latest Aircrack-ng
-        run: |
-          git clone https://github.com/aircrack-ng/aircrack-ng.git
-          cd aircrack-ng
+    - name: Verify architecture
+      run: |
+        arch=$(uname -m)
+        echo "Current architecture: $arch"
+        if [ "$arch" != "aarch64" ] && [ "$arch" != "arm64" ]; then
+          echo "Warning: Build is not on native ARMv8l architecture"
+        fi
 
-      - name: Configure Build for ARMv8l
-        run: |
-          cd aircrack-ng
-          ./autogen.sh
-          CFLAGS="-march=armv8-a" ./configure --host=arm-linux-gnueabihf
-          make -j$(nproc)
+    - name: Autogen and Configure
+      run: |
+        ./autogen.sh
+        ./configure --prefix=/usr/local
 
-      - name: Verify Installation
-        run: |
-          cd aircrack-ng/src
-          ./aircrack-ng --help
+    - name: Build Aircrack-ng
+      run: |
+        make -j$(nproc)
+        make check
 
-      - name: Archive Build Artifacts
-        run: |
-          mkdir -p ./artifacts
-          cp ./aircrack-ng/src/aircrack-ng ./artifacts/
-          cp ./aircrack-ng/src/airmon-ng ./artifacts/
-          cp ./aircrack-ng/src/airodump-ng ./artifacts/
-          cp ./aircrack-ng/src/aireplay-ng ./artifacts/
+    - name: Install Aircrack-ng
+      run: |
+        make install
+        ldconfig
 
-      - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: aircrack-ng-build
-          path: ./artifacts/
+    - name: Package Binaries
+      run: |
+        mkdir -p aircrack-ng-armv8l/bin
+        cp /usr/local/bin/aircrack-ng aircrack-ng-armv8l/bin/
+        cp /usr/local/bin/airdecap-ng aircrack-ng-armv8l/bin/
+        cp /usr/local/bin/airodump-ng aircrack-ng-armv8l/bin/
+        cp /usr/local/bin/aireplay-ng aircrack-ng-armv8l/bin/
+        cp /usr/local/bin/airmon-ng aircrack-ng-armv8l/bin/
+        
+        tar -czvf aircrack-ng-armv8l.tar.gz aircrack-ng-armv8l
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        env:
-          GITHUB_TOKEN: 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
-        with:
-          files: ./artifacts/*
-          draft: false
-          prerelease: false
-          
+    - name: Create Release
+      if: ${{ github.event_name == 'workflow_dispatch' && inputs.release == true }}
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          aircrack-ng-armv8l.tar.gz
+        tag_name: ${{ github.ref_name }}-armv8l-${{ github.sha }}
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ env.GETO_TOKEN }}
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: aircrack-ng-armv8l
+        path: aircrack-ng-armv8l.tar.gz
+
+  # Optional: Test on actual ARMv8l device
+  test:
+    needs: build
+    # You would replace this with an actual ARMv8l test runner
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: aircrack-ng-armv8l
+
+    - name: Preliminary Tests
+      run: |
+        tar -xzvf aircrack-ng-armv8l.tar.gz
+        ./aircrack-ng-armv8l/bin/aircrack-ng --help
+        # Add more specific tests as needed
+
+# Notes:
+# 1. This workflow builds Aircrack-ng from source for ARMv8l
+# 2. It can create a release when manually triggered
+# 3. Artifacts are always uploaded
+# 4. Actual testing on an ARMv8l device would require additional setup
