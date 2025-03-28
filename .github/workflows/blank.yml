@@ -1,0 +1,75 @@
+name: Build and Release Aircrack-ng for ARMv8l
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      GITHUB_TOKEN: ghp_your_token_here  # Replace with your real token
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v3
+
+      - name: Install Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            build-essential \
+            libssl-dev \
+            pkg-config \
+            libnl-3-dev \
+            libnl-genl-3-dev \
+            libpcap-dev \
+            zlib1g-dev \
+            git \
+            autoconf \
+            automake \
+            libtool
+
+      - name: Clone Latest Aircrack-ng
+        run: |
+          git clone https://github.com/aircrack-ng/aircrack-ng.git
+          cd aircrack-ng
+
+      - name: Configure Build for ARMv8l
+        run: |
+          cd aircrack-ng
+          ./autogen.sh
+          CFLAGS="-march=armv8-a" ./configure --host=arm-linux-gnueabihf
+          make -j$(nproc)
+
+      - name: Verify Installation
+        run: |
+          cd aircrack-ng/src
+          ./aircrack-ng --help
+
+      - name: Archive Build Artifacts
+        run: |
+          mkdir -p ./artifacts
+          cp ./aircrack-ng/src/aircrack-ng ./artifacts/
+          cp ./aircrack-ng/src/airmon-ng ./artifacts/
+          cp ./aircrack-ng/src/airodump-ng ./artifacts/
+          cp ./aircrack-ng/src/aireplay-ng ./artifacts/
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: aircrack-ng-build
+          path: ./artifacts/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: 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
+        with:
+          files: ./artifacts/*
+          draft: false
+          prerelease: false
+          
